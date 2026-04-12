@@ -45,6 +45,8 @@ def add_stock():
 
     ticker   = match.group(1)
     exchange = match.group(2)
+    # Normalise: store with dot (BRK.B) regardless of whether user typed BRK.B or BRK-B
+    ticker   = ticker.replace("-", ".")
     wl       = load_watchlist()
 
     all_tickers = [e["ticker"].upper() for e in wl.get("us", []) + wl.get("india", [])]

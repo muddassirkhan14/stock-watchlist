@@ -52,6 +52,7 @@ def fetch_quote(ticker: str, exchange: str, session, crumb) -> dict:
     or      { ok: False, error: str }
     """
     symbol = yf_symbol(ticker, exchange)
+    print(f"  YF symbol: {symbol}")
     try:
         # v8 chart — price + 52W range + day change
         r = session.get(

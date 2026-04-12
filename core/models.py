@@ -12,7 +12,9 @@ EXCHANGE_SUFFIX = {
 
 def yf_symbol(ticker: str, exchange: str) -> str:
     """Return the Yahoo Finance symbol for a ticker+exchange pair."""
-    return ticker + EXCHANGE_SUFFIX.get(exchange.upper(), "")
+    # Yahoo Finance uses hyphens for dots in tickers like BRK.B → BRK-B
+    yf_ticker = ticker.replace(".", "-")
+    return yf_ticker + EXCHANGE_SUFFIX.get(exchange.upper(), "")
 
 
 def safe_float(val, default: float = 0.0) -> float:
