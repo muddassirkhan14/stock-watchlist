@@ -1,6 +1,10 @@
 # Stock Watchlist
 
 A local web app to track US and Indian stocks with live prices from Yahoo Finance.
+<img width="1286" height="306" alt="image" src="https://github.com/user-attachments/assets/4d5edc90-0ce4-447a-b019-a1d8647d7e62" />
+<img width="1290" height="423" alt="image" src="https://github.com/user-attachments/assets/ac0004bc-b500-4202-ab8f-dc187e2674c6" />
+
+
 
 ## Features
 - Add stocks manually via `TICKER(EXCHANGE)` format — e.g. `AAPL(NASDAQ)` or `TCS(NSE)`
