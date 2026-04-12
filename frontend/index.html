@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Stock Watchlist</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f9fafb;color:#111;font-size:14px}
+    a{color:#3b82f6;text-decoration:none;font-weight:600}
+    a:hover{text-decoration:underline}
+    button{font-family:inherit;cursor:pointer;border-radius:6px}
+    input,select{font-family:inherit}
+
+    #app{max-width:1300px;margin:0 auto;padding:1.5rem}
+
+    /* Header */
+    .hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px}
+    .hdr h1{font-size:21px;font-weight:700}
+    .hdr-right{display:flex;gap:8px;align-items:center}
+
+    /* Tabs */
+    .tabs{display:flex;gap:0;margin-bottom:1.5rem;border-bottom:2px solid #e5e7eb}
+    .tab{padding:8px 22px;font-size:14px;font-weight:500;border:none;background:none;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-2px;cursor:pointer}
+    .tab:hover{color:#111}
+    .tab.active{color:#6366f1;border-bottom-color:#6366f1}
+    .tab-count{margin-left:6px;font-size:11px;color:#9ca3af;background:#f3f4f6;padding:1px 7px;border-radius:10px}
+
+    /* Page */
+    .page{display:none}.page.active{display:block}
+
+    /* Toolbar */
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:1.25rem}
+    .toolbar input{font-size:13px;padding:7px 11px;border:1px solid #d1d5db;border-radius:6px;width:230px;outline:none}
+    .toolbar input:focus{border-color:#6366f1}
+    .btn-add{font-size:13px;padding:7px 15px;border:none;background:#6366f1;color:#fff;font-weight:600}
+    .btn-add:disabled{background:#a5b4fc;cursor:not-allowed}
+    .add-hint{font-size:12px;color:#9ca3af}
+    .add-err{font-size:12px;color:#dc2626;margin-top:4px;width:100%}
+    .sep{width:1px;height:24px;background:#e5e7eb;margin:0 4px}
+
+    /* View toggle */
+    .btn-view{font-size:12px;padding:6px 12px;border:1px solid #d1d5db;background:#fff;color:#374151;font-weight:500}
+    .btn-view.active{background:#6366f1;color:#fff;border-color:#6366f1}
+
+    /* Buttons */
+    .btn-refresh{font-size:13px;padding:7px 14px;border:1px solid #d1d5db;background:#fff;color:#374151;font-weight:500}
+    .btn-refresh:disabled{color:#9ca3af;cursor:not-allowed}
+    .btn-del{font-size:11px;padding:3px 9px;border:1px solid #fca5a5;background:#fff;color:#dc2626}
+    .btn-del:hover{background:#fef2f2}
+    .chg-up{color:#16a34a;font-size:12px;line-height:1.4}
+    .chg-dn{color:#dc2626;font-size:12px;line-height:1.4}
+    .chg-flat{color:#9ca3af;font-size:12px}
+    .btn-save{font-size:11px;padding:3px 8px;border:1px solid #d1d5db;background:#fff;color:#374151}
+
+    /* Table */
+    .tbl-wrap{border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;overflow-x:auto}
+    table{border-collapse:collapse;width:100%}
+    th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap;user-select:none}
+    th.sortable{cursor:pointer}
+    th.sortable:hover{background:#ece9fb;color:#6366f1}
+    th.sort-asc::after{content:" ↑"}
+    th.sort-desc::after{content:" ↓"}
+    td{padding:10px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;vertical-align:middle}
+    tr:last-child td{border-bottom:none}
+    tr:nth-child(even) td{background:#f9fafb}
+    tr:nth-child(odd) td{background:#fff}
+    tr:hover td{background:#eef2ff!important}
+
+    /* Drag handle */
+    .drag-handle{cursor:grab;color:#d1d5db;font-size:16px;padding:0 4px;user-select:none}
+    .drag-handle:hover{color:#6b7280}
+    tr.dragging{opacity:.4}
+    tr.drag-over td{border-top:2px solid #6366f1}
+
+    /* Range bar */
+    .rbar{display:flex;align-items:center;gap:5px;min-width:110px}
+    .rtrack{flex:1;height:5px;background:#e5e7eb;border-radius:3px;overflow:hidden;position:relative}
+    .rfill{position:absolute;left:0;top:0;height:100%;border-radius:3px}
+    .rpct{font-size:11px;color:#9ca3af;min-width:26px;text-align:right}
+
+    /* Note */
+    .note{cursor:pointer;font-size:12px;display:inline-block;min-width:100px;padding:2px 4px;border-radius:4px;color:#9ca3af}
+    .note.has{color:#374151}
+    .note:hover{background:#f3f4f6}
+    .nedit{display:flex;gap:3px}
+    .nedit input{font-size:12px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;width:140px;outline:none}
+    .nedit input:focus{border-color:#6366f1}
+
+    /* Sector grouping view */
+    .sector-block{margin-bottom:1.75rem}
+    .sector-hdr{font-size:13px;font-weight:700;color:#374151;padding:8px 14px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px 8px 0 0;border-bottom:none;display:flex;align-items:center;gap:8px}
+    .industry-hdr{font-size:12px;font-weight:600;color:#6b7280;padding:6px 14px 6px 28px;background:#fafafa;border-bottom:1px solid #f3f4f6}
+    .sector-badge{font-size:11px;padding:1px 8px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:600}
+
+    /* Empty */
+    .empty{text-align:center;padding:2.5rem;color:#9ca3af;font-size:13px}
+
+    /* Legend */
+    .legend{display:flex;gap:16px;font-size:12px;color:#9ca3af;flex-wrap:wrap;margin-top:.75rem}
+    .dot{display:inline-block;width:9px;height:5px;border-radius:2px;margin-right:4px;vertical-align:middle}
+
+    /* Toast */
+    #toast{position:fixed;top:16px;right:16px;z-index:999;font-size:13px;padding:10px 18px;border-radius:8px;color:#fff;display:none;font-weight:500}
+  </style>
+</head>
+<body>
+<div id="app"><p style="padding:2rem;color:#9ca3af">Loading...</p></div>
+<div id="toast"></div>
+<script>
+// ── State ──────────────────────────────────────────────────
+const state = {
+  us:    [],
+  india: [],
+  view:  { us: "flat", india: "flat" },   // flat | sector
+  sort:  { us: {col:null,dir:1}, india: {col:null,dir:1} },
+  activeTab: "us",
+};
+
+// ── Toast ──────────────────────────────────────────────────
+function toast(msg, type) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.background = type==="error"?"#b91c1c":type==="info"?"#1d4ed8":"#15803d";
+  el.style.display = "block";
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.display="none", 3500);
+}
+
+// ── Helpers ────────────────────────────────────────────────
+function fmt(val, prefix="$") {
+  const n = Number(val);
+  return prefix + (isNaN(n) ? "0.00" : n.toFixed(2));
+}
+function fmtChange(change, pct, prefix) {
+  const c=Number(change), p=Number(pct);
+  if (!c && !p) return `<span class="chg-flat">—</span>`;
+  const sign=c>=0?"+":""; const cls=c>0?"chg-up":c<0?"chg-dn":"chg-flat";
+  return `<span class="${cls}">${sign}${prefix}${Math.abs(c).toFixed(2)}<br><small>${sign}${p.toFixed(2)}%</small></span>`;
+}
+function fmtPE(val) {
+  const n = Number(val);
+  return (!n || isNaN(n)) ? "—" : n.toFixed(2);
+}
+function curr(section) { return section==="india" ? "₹" : "$"; }
+
+function rbar(price, low, high) {
+  const pct = (low>=high)?0:Math.min(100,Math.max(0,(price-low)/(high-low)*100));
+  const color = pct<30?"#ef4444":pct<60?"#f59e0b":"#22c55e";
+  return `<div class="rbar"><div class="rtrack"><div class="rfill" style="width:${pct.toFixed(1)}%;background:${color}"></div></div><span class="rpct">${pct.toFixed(0)}%</span></div>`;
+}
+
+// ── Note cell ──────────────────────────────────────────────
+function noteHTML(ticker, section, note) {
+  const safe=(note||"").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  return `<span class="note${note?" has":""}" data-ticker="${ticker}" data-section="${section}" onclick="editNote(this)">${safe||"+ note"}</span>`;
+}
+function editNote(el) {
+  const {ticker,section}=el.dataset;
+  const cur=el.classList.contains("has")?el.textContent:"";
+  const wrap=document.createElement("div");wrap.className="nedit";
+  wrap.innerHTML=`<input type="text" value="${cur.replace(/"/g,"&quot;")}" placeholder="Add note..."/><button class="btn-save">Save</button>`;
+  el.replaceWith(wrap);
+  const inp=wrap.querySelector("input");inp.focus();inp.select();
+  const restore=(val)=>{
+    const s=document.createElement("span");
+    s.className="note"+(val?" has":"");s.dataset.ticker=ticker;s.dataset.section=section;
+    s.textContent=val||"+ note";s.onclick=()=>editNote(s);wrap.replaceWith(s);
+  };
+  const save=async()=>{
+    const val=inp.value.trim();
+    await fetch("/api/note",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticker,note:val,section})});
+    const stock=state[section].find(s=>s.ticker===ticker);
+    if(stock) stock.notes=val;
+    restore(val);
+  };
+  wrap.querySelector(".btn-save").onclick=save;
+  inp.onkeydown=e=>{if(e.key==="Enter")save();if(e.key==="Escape")restore(cur);};
+}
+
+// ── Delete ─────────────────────────────────────────────────
+async function del(ticker, section) {
+  if (!confirm(`Remove ${ticker}?`)) return;
+  const r=await fetch("/api/delete",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticker,section})});
+  const j=await r.json();
+  if (j.ok) {
+    state[section]=state[section].filter(s=>s.ticker!==ticker);
+    renderTable(section);
+    updateTabCount(section);
+    toast(`Removed ${ticker}`);
+  } else toast(j.error||"Error","error");
+}
+
+// ── Sort ───────────────────────────────────────────────────
+const COL_KEYS = {
+  name:1, ticker:1, price:1, change:1, high:1, low:1, pe:1, range:1, sector:1, industry:1
+};
+
+function sortBy(section, col) {
+  const s = state.sort[section];
+  if (s.col === col) s.dir *= -1;
+  else { s.col = col; s.dir = 1; }
+  renderTable(section);
+}
+
+function getSorted(section) {
+  const {col, dir} = state.sort[section];
+  const arr = [...state[section]];
+  if (!col) return arr;
+  return arr.sort((a, b) => {
+    let av = a[col], bv = b[col];
+    if (col==="range") {
+      const pct = s => (s.low>=s.high)?0:(s.price-s.low)/(s.high-s.low)*100;
+      av=pct(a); bv=pct(b);
+    }
+    if (typeof av==="number") return (av-bv)*dir;
+    return String(av||"").localeCompare(String(bv||""))*dir;
+  });
+}
+
+function thClass(section, col) {
+  const s=state.sort[section];
+  if (s.col!==col) return "sortable";
+  return s.dir===1?"sortable sort-asc":"sortable sort-desc";
+}
+
+// ── Drag & drop ────────────────────────────────────────────
+let dragSrc = null;
+
+function onDragStart(e) {
+  dragSrc = e.currentTarget;
+  dragSrc.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+}
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  document.querySelectorAll("tr.drag-over").forEach(r=>r.classList.remove("drag-over"));
+  const row = e.currentTarget.closest("tr");
+  if (row && row !== dragSrc) row.classList.add("drag-over");
+}
+function onDragLeave(e) {
+  e.currentTarget.closest("tr")?.classList.remove("drag-over");
+}
+async function onDrop(e, section) {
+  e.preventDefault();
+  const targetRow = e.currentTarget.closest("tr");
+  if (!targetRow || targetRow===dragSrc) return;
+  targetRow.classList.remove("drag-over");
+  const tbody = targetRow.closest("tbody");
+  const rows  = [...tbody.querySelectorAll("tr")];
+  const si = rows.indexOf(dragSrc);
+  const ti = rows.indexOf(targetRow);
+  if (si<0||ti<0) return;
+  // reorder DOM
+  if (si<ti) tbody.insertBefore(dragSrc, targetRow.nextSibling);
+  else       tbody.insertBefore(dragSrc, targetRow);
+  // reorder state
+  const newOrder = [...tbody.querySelectorAll("tr")].map(r=>r.dataset.ticker);
+  const map = Object.fromEntries(state[section].map(s=>[s.ticker,s]));
+  state[section] = newOrder.map(t=>map[t]).filter(Boolean);
+  // persist
+  await fetch("/api/reorder",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({section, order: newOrder})});
+}
+function onDragEnd(e) {
+  dragSrc?.classList.remove("dragging");
+  document.querySelectorAll("tr.drag-over").forEach(r=>r.classList.remove("drag-over"));
+  dragSrc=null;
+}
+
+// ── Build single row ───────────────────────────────────────
+function buildRow(s, section, showSectorCols) {
+  const c   = curr(section);
+  const tvEx = s.exchange==="NASDAQ"?"NASDAQ":s.exchange==="NYSE"?"NYSE":s.exchange;
+  const tvUrl = `https://www.tradingview.com/symbols/${tvEx}:${s.ticker}/`;
+  const yfUrl = `https://finance.yahoo.com/quote/${s.ticker}${({"NSE":".NS","BSE":".BO","LSE":".L","TSX":".TO","ASX":".AX"})[s.exchange]||""}/`;
+  const sectorCols = showSectorCols
+    ? `<td style="font-size:12px;color:#6b7280">${s.sector||"—"}</td><td style="font-size:12px;color:#6b7280">${s.industry||"—"}</td>`
+    : "";
+  const changeCell = fmtChange(s.change, s.change_pct, c);
+  return `<tr data-ticker="${s.ticker}" draggable="true"
+    ondragstart="onDragStart(event)"
+    ondragover="onDragOver(event)"
+    ondragleave="onDragLeave(event)"
+    ondrop="onDrop(event,'${section}')"
+    ondragend="onDragEnd(event)">
+    <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
+    <td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis">${s.name}</td>
+    <td>
+      <a href="${tvUrl}" target="_blank" title="TradingView">${s.ticker}</a>
+      <a href="${yfUrl}" target="_blank" title="Yahoo Finance" style="margin-left:6px;font-size:11px;color:#9ca3af;font-weight:400">YF↗</a>
+      <span style="margin-left:5px;font-size:11px;color:#9ca3af">${s.exchange}</span>
+    </td>
+    <td style="font-weight:600">${fmt(s.price,c)}</td>
+    <td>${changeCell}</td>
+    <td style="color:#16a34a">${fmt(s.high,c)}</td>
+    <td style="color:#dc2626">${fmt(s.low,c)}</td>
+    <td>${fmtPE(s.pe)}</td>
+    <td>${rbar(s.price,s.low,s.high)}</td>
+    <td>${noteHTML(s.ticker,section,s.notes)}</td>
+    ${sectorCols}
+    <td><button class="btn-del" onclick="del('${s.ticker}','${section}')">Delete</button></td>
+  </tr>`;
+}
+
+// ── Flat table render ──────────────────────────────────────
+function flatTable(section) {
+  const stocks = getSorted(section);
+  const sc     = section;
+  const thS    = (col,label) => `<th class="${thClass(sc,col)}" onclick="sortBy('${sc}','${col}')">${label}</th>`;
+  const c      = curr(section);
+
+  if (!stocks.length) return `<div class="tbl-wrap"><div class="empty">No stocks yet — add one above</div></div>`;
+
+  return `<div class="tbl-wrap"><table>
+    <thead><tr>
+      <th style="width:32px"></th>
+      ${thS("name","Name")}${thS("ticker","Ticker")}
+      ${thS("price",`Price (${c})`)}${thS("change","Day Change")}${thS("high","52W High")}${thS("low","52W Low")}
+      ${thS("pe","P/E")}
+      <th class="sortable" onclick="sortBy('${sc}','range')" class="${thClass(sc,'range')}">52W Range</th>
+      <th>Notes</th>
+      ${thS("sector","Sector")}${thS("industry","Industry")}
+      <th></th>
+    </tr></thead>
+    <tbody>${stocks.map(s=>buildRow(s,section,true)).join("")}</tbody>
+  </table></div>`;
+}
+
+// ── Sector grouped render ──────────────────────────────────
+function sectorTable(section) {
+  const stocks = state[section];
+  if (!stocks.length) return `<div class="tbl-wrap"><div class="empty">No stocks yet — add one above</div></div>`;
+
+  // Group by sector → industry
+  const groups = {};
+  for (const s of stocks) {
+    const sec = s.sector   || "Other";
+    const ind = s.industry || "Other";
+    if (!groups[sec])       groups[sec]    = {};
+    if (!groups[sec][ind])  groups[sec][ind] = [];
+    groups[sec][ind].push(s);
+  }
+
+  const c = curr(section);
+  let html = "";
+  for (const [sec, industries] of Object.entries(groups).sort()) {
+    const total = Object.values(industries).flat().length;
+    html += `<div class="sector-block">
+      <div class="sector-hdr">
+        <span class="sector-badge">${total}</span>
+        ${sec}
+      </div>
+      <div class="tbl-wrap" style="border-radius:0 0 8px 8px">
+        <table>
+          <thead><tr>
+            <th style="width:32px"></th>
+            <th>Name</th><th>Ticker</th>
+            <th>Price (${c})</th><th>Day Change</th><th>52W High</th><th>52W Low</th>
+            <th>P/E</th><th style="min-width:120px">52W Range</th>
+            <th>Notes</th><th></th>
+          </tr></thead>
+          <tbody>`;
+    for (const [ind, indStocks] of Object.entries(industries).sort()) {
+      html += `<tr><td colspan="10" class="industry-hdr">${ind} (${indStocks.length})</td></tr>`;
+      html += indStocks.map(s=>buildRow(s,section,false)).join("");
+    }
+    html += `</tbody></table></div></div>`;
+  }
+  return html;
+}
+
+// ── Render table area ──────────────────────────────────────
+function renderTable(section) {
+  const el = document.getElementById(`table-area-${section}`);
+  if (!el) return;
+  el.innerHTML = state.view[section]==="sector" ? sectorTable(section) : flatTable(section);
+}
+
+// ── View toggle ────────────────────────────────────────────
+function setView(section, view) {
+  state.view[section] = view;
+  ["flat","sector"].forEach(v=>{
+    const btn=document.getElementById(`view-${section}-${v}`);
+    if(btn) btn.classList.toggle("active", v===view);
+  });
+  renderTable(section);
+}
+
+// ── Tab switch ─────────────────────────────────────────────
+function switchTab(tab) {
+  state.activeTab = tab;
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===tab));
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+tab));
+}
+
+// ── Update tab count ───────────────────────────────────────
+function updateTabCount(section) {
+  const el=document.getElementById(`tab-count-${section}`);
+  if(el) el.textContent=state[section].length;
+}
+
+// ── Add stock ──────────────────────────────────────────────
+async function addStock(section) {
+  const inp=document.getElementById(`inp-${section}`);
+  const err=document.getElementById(`err-${section}`);
+  const btn=document.getElementById(`btn-${section}`);
+  const val=inp.value.trim();
+  err.textContent="";
+  if(!val) return;
+  if(!/^[A-Za-z0-9.\-]+\([A-Za-z]+\)$/.test(val)){
+    err.textContent="Format: TICKER(EXCHANGE) — e.g. AAPL(NASDAQ) or TCS(NSE)";return;
+  }
+  btn.disabled=true;btn.textContent="Fetching…";
+  toast("Fetching from Yahoo Finance…","info");
+  const r=await fetch("/api/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input:val,section})});
+  const j=await r.json();
+  btn.disabled=false;btn.textContent="Add";
+  if(!j.ok){err.textContent=j.error||"Failed";return;}
+  inp.value="";
+  state[section].push(j.stock);
+  renderTable(section);
+  updateTabCount(section);
+  toast(`Added ${j.stock.ticker} @ ${curr(section)}${j.stock.price}`);
+}
+
+// ── Refresh all ────────────────────────────────────────────
+async function refreshAll() {
+  const btn=document.getElementById("refresh-btn");
+  btn.disabled=true;btn.textContent="Refreshing…";
+  toast("Refreshing all prices…","info");
+  await fetch("/api/refresh",{method:"POST"});
+  location.reload();
+}
+
+// ── Page HTML ──────────────────────────────────────────────
+function buildPageShell(section) {
+  const hint = section==="india"
+    ? "e.g. TCS(NSE) or INFY(BSE)"
+    : "e.g. AAPL(NASDAQ) or BP(LSE)";
+  const exchanges = section==="india"
+    ? "NSE · BSE"
+    : "NYSE · NASDAQ · OTC · LSE · TSX · ASX";
+  return `
+    <div class="toolbar">
+      <input id="inp-${section}" type="text" placeholder="${hint}"
+        onkeydown="if(event.key==='Enter') addStock('${section}')"/>
+      <button class="btn-add" id="btn-${section}" onclick="addStock('${section}')">Add</button>
+      <span class="add-hint">${exchanges}</span>
+      <div class="sep"></div>
+      <button class="btn-view active" id="view-${section}-flat"  onclick="setView('${section}','flat')">Flat</button>
+      <button class="btn-view"        id="view-${section}-sector" onclick="setView('${section}','sector')">By Sector</button>
+      <div class="add-err" id="err-${section}"></div>
+    </div>
+    <div id="table-area-${section}"></div>
+    <div class="legend">
+      <span><span class="dot" style="background:#22c55e"></span>Above 60% of 52W range</span>
+      <span><span class="dot" style="background:#f59e0b"></span>30–60%</span>
+      <span><span class="dot" style="background:#ef4444"></span>Below 30%</span>
+      <span style="margin-left:auto">⠿ drag to reorder · click column header to sort · click note to edit</span>
+    </div>`;
+}
+
+// ── Init ───────────────────────────────────────────────────
+async function init() {
+  const r    = await fetch("/api/stocks");
+  const data = await r.json();
+  state.us    = data.us    || [];
+  state.india = data.india || [];
+
+  document.getElementById("app").innerHTML = `
+    <div class="hdr">
+      <h1>Stock Watchlist</h1>
+      <div class="hdr-right">
+        <button class="btn-refresh" id="refresh-btn" onclick="refreshAll()">Refresh prices</button>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="us" onclick="switchTab('us')">
+        🇺🇸 US &amp; Global
+        <span class="tab-count" id="tab-count-us">${state.us.length}</span>
+      </button>
+      <button class="tab" data-tab="india" onclick="switchTab('india')">
+        🇮🇳 India
+        <span class="tab-count" id="tab-count-india">${state.india.length}</span>
+      </button>
+    </div>
+    <div id="page-us"    class="page active">${buildPageShell("us")}</div>
+    <div id="page-india" class="page"       >${buildPageShell("india")}</div>`;
+
+  renderTable("us");
+  renderTable("india");
+}
+
+init().catch(e=>{
+  document.getElementById("app").innerHTML=`<p style="padding:2rem;color:#dc2626">Error: ${e.message}</p>`;
+});
+</script>
+</body>
+</html>

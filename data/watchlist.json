@@ -1,0 +1,24 @@
+{
+  "us": [
+    {
+      "ticker": "BP",
+      "exchange": "LSE",
+      "notes": "",
+      "order": 0
+    }
+  ],
+  "india": [
+    {
+      "ticker": "TCS",
+      "exchange": "NSE",
+      "notes": "",
+      "order": 0
+    },
+    {
+      "ticker": "INFY",
+      "exchange": "NSE",
+      "notes": "",
+      "order": 1
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Data — keep watchlist but ignore price cache
+data/cache.json
+data/stocks.json
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
