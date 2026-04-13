@@ -52,12 +52,11 @@ def fetch_quote(ticker: str, exchange: str, session, crumb) -> dict:
     or      { ok: False, error: str }
     """
     symbol = yf_symbol(ticker, exchange)
-    print(f"  YF symbol: {symbol}")
     try:
         # v8 chart — price + 52W range + day change
         r = session.get(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-            params={"range": "1y", "interval": "1d", "crumb": crumb},
+            params={"range": "5d", "interval": "1d", "crumb": crumb},
             timeout=15,
         )
         if r.status_code == 429:
@@ -74,16 +73,32 @@ def fetch_quote(ticker: str, exchange: str, session, crumb) -> dict:
         high52 = safe_float(meta.get("fiftyTwoWeekHigh"))
         low52  = safe_float(meta.get("fiftyTwoWeekLow"))
         name   = meta.get("shortName") or meta.get("longName") or ticker
-        change     = safe_float(meta.get("regularMarketChange"))
-        change_pct = safe_float(meta.get("regularMarketChangePercent"))
 
-        # Derive 52W from OHLC if not in meta
+        # Day change — use last two closing prices from 5d OHLC
+        closes = [c for c in result[0].get("indicators", {}).get("quote", [{}])[0].get("close", []) if c]
+        if len(closes) >= 2:
+            prev_close = closes[-2]
+            change     = round(price - prev_close, 2)
+            change_pct = round((change / prev_close) * 100, 2)
+        else:
+            change     = 0.0
+            change_pct = 0.0
+
+        # 52W high/low — fetch separately with 1y range if not in meta
         if not high52 or not low52:
-            q     = result[0].get("indicators", {}).get("quote", [{}])[0]
-            highs = [h for h in q.get("high", []) if h]
-            lows  = [l for l in q.get("low",  []) if l]
-            if highs: high52 = round(max(highs), 2)
-            if lows:  low52  = round(min(lows),  2)
+            r1y = session.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                params={"range": "1y", "interval": "1d", "crumb": crumb},
+                timeout=15,
+            )
+            if r1y.status_code == 200:
+                res1y = r1y.json().get("chart", {}).get("result", [])
+                if res1y:
+                    q     = res1y[0].get("indicators", {}).get("quote", [{}])[0]
+                    highs = [h for h in q.get("high", []) if h]
+                    lows  = [l for l in q.get("low",  []) if l]
+                    if highs: high52 = round(max(highs), 2)
+                    if lows:  low52  = round(min(lows),  2)
 
         time.sleep(0.4)
 
