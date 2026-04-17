@@ -3,12 +3,22 @@ app.py — Flask routes only. Business logic lives in core/.
 """
 
 import re
+from datetime import datetime
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from core.models  import merge
-from core.storage import load_watchlist, save_watchlist, load_cache, save_cache
-from core.yahoo   import fetch_quote, refresh_all_prices, get_session_and_crumb
+from core.storage import (
+    load_watchlist, save_watchlist,
+    load_cache, save_cache,
+    load_prefs, save_prefs,
+)
+from core.yahoo   import (
+    fetch_quote, refresh_all_prices, refresh_all_prices_async,
+    get_session_and_crumb,
+    get_history_cached, compute_return,
+    REFRESH_STATUS,
+)
 
 app = Flask(__name__, static_folder="frontend", static_url_path="")
 CORS(app)
@@ -74,17 +84,7 @@ def add_stock():
 
     # Persist to cache (prices)
     cache = load_cache()
-    cache[ticker] = {
-        "name":       result["name"],
-        "price":      result["price"],
-        "change":     result["change"],
-        "change_pct": result["change_pct"],
-        "high":       result["high"],
-        "low":        result["low"],
-        "pe":         result["pe"],
-        "sector":     result["sector"],
-        "industry":   result["industry"],
-    }
+    cache[ticker] = {k: v for k, v in result.items() if k != "ok"}
     save_cache(cache)
 
     stock = merge(wl_entry, cache)
@@ -143,12 +143,125 @@ def reorder():
 
 @app.route("/api/refresh", methods=["POST"])
 def refresh():
-    refresh_all_prices()
-    data = get_full_data()
+    """Kick off a background price refresh. Non-blocking."""
+    started = refresh_all_prices_async()
     return jsonify({
-        "ok":    True,
-        "us":    len(data["us"]),
-        "india": len(data["india"]),
+        "ok":      True,
+        "started": started,
+        "status":  REFRESH_STATUS,
+    })
+
+
+@app.route("/api/status")
+def status():
+    """Current background-refresh progress."""
+    return jsonify(REFRESH_STATUS)
+
+
+# ── UI preferences (column order + visibility) ────────────────
+
+@app.route("/api/prefs", methods=["GET"])
+def get_prefs():
+    return jsonify(load_prefs())
+
+
+@app.route("/api/prefs", methods=["PUT"])
+def put_prefs():
+    """
+    Merge-update preferences. Body: { section, order?, visible? }
+    where visible is a partial map { colId: bool }.
+    """
+    body    = request.get_json() or {}
+    section = body.get("section")
+    if section not in ("us", "india"):
+        return jsonify({"ok": False, "error": "Invalid section"}), 400
+
+    prefs = load_prefs()
+    current = prefs.get(section) or {}
+    order   = current.get("order")
+    visible = current.get("visible") or {}
+
+    if isinstance(body.get("order"), list):
+        order = [str(x) for x in body["order"]]
+    if isinstance(body.get("visible"), dict):
+        for k, v in body["visible"].items():
+            visible[str(k)] = bool(v)
+
+    prefs[section] = {"order": order or [], "visible": visible}
+    save_prefs(prefs)
+    return jsonify({"ok": True, "prefs": prefs[section]})
+
+
+# ── Date-range performance ────────────────────────────────────
+
+def _parse_iso_date(s: str):
+    """Parse 'YYYY-MM-DD' → unix timestamp (start of day, local tz). None on failure."""
+    if not s:
+        return None
+    try:
+        return int(datetime.strptime(s, "%Y-%m-%d").timestamp())
+    except Exception:
+        return None
+
+
+@app.route("/api/returns", methods=["POST"])
+def returns():
+    """
+    Compute return % for every ticker in a section between `from` and `to`.
+    Body: { section, from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
+    Returns: { "TICKER": { start, end, return_pct, high, low } | null, ... }
+    """
+    body    = request.get_json() or {}
+    section = body.get("section", "us")
+    from_ts = _parse_iso_date(body.get("from"))
+    to_ts   = _parse_iso_date(body.get("to"))
+    if from_ts is None or to_ts is None or from_ts >= to_ts:
+        return jsonify({"ok": False, "error": "Invalid date range"}), 400
+
+    wl      = load_watchlist()
+    entries = wl.get(section, [])
+
+    session, crumb = get_session_and_crumb()
+    out = {}
+    for entry in entries:
+        ticker   = entry["ticker"]
+        exchange = entry["exchange"]
+        series   = get_history_cached(ticker, exchange, session, crumb)
+        out[ticker] = compute_return(series, from_ts, to_ts)
+
+    return jsonify({"ok": True, "returns": out})
+
+
+@app.route("/api/history/<ticker>")
+def history(ticker):
+    """
+    Return sliced daily close series for one ticker between `from` and `to`.
+    Query: ?from=YYYY-MM-DD&to=YYYY-MM-DD&section=us|india
+    """
+    ticker  = ticker.upper()
+    section = request.args.get("section", "us")
+    from_ts = _parse_iso_date(request.args.get("from"))
+    to_ts   = _parse_iso_date(request.args.get("to"))
+    if from_ts is None or to_ts is None or from_ts >= to_ts:
+        return jsonify({"ok": False, "error": "Invalid date range"}), 400
+
+    wl    = load_watchlist()
+    entry = next(
+        (e for e in wl.get(section, []) if e["ticker"].upper() == ticker),
+        None,
+    )
+    if not entry:
+        return jsonify({"ok": False, "error": "Ticker not in watchlist"}), 404
+
+    series = get_history_cached(entry["ticker"], entry["exchange"])
+    sliced = [[ts, cl] for ts, cl in series if from_ts <= ts <= to_ts]
+    stats  = compute_return(series, from_ts, to_ts)
+
+    return jsonify({
+        "ok":     True,
+        "ticker": ticker,
+        "series": sliced,
+        "stats":  stats,
     })
 
 
@@ -164,7 +277,7 @@ def serve(path):
 
 if __name__ == "__main__":
     print("\n=== Stock Watchlist ===")
-    print("Refreshing prices from Yahoo Finance...")
-    refresh_all_prices()
+    print("Starting server — prices will refresh in the background.")
+    refresh_all_prices_async()
     print("\nOpen http://localhost:7080\n")
     app.run(port=7080, debug=False)

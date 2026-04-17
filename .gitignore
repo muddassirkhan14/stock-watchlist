@@ -6,9 +6,11 @@ __pycache__/
 venv/
 .venv/
 
-# Data — keep watchlist but ignore price cache
+# Data — keep watchlist but ignore price cache / runtime prefs
 data/cache.json
 data/stocks.json
+data/history.json
+data/prefs.json
 
 # macOS
 .DS_Store

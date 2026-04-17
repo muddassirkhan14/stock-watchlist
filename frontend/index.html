@@ -4,6 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Stock Watchlist</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f9fafb;color:#111;font-size:14px}
@@ -73,6 +74,22 @@
     tr.dragging{opacity:.4}
     tr.drag-over td{border-top:2px solid #6366f1}
 
+    /* Column-header drag */
+    th[draggable="true"]{cursor:grab}
+    th.col-dragging{opacity:.4}
+    th.col-drop-target{border-left:3px solid #6366f1!important}
+
+    /* Columns dropdown */
+    .cols-wrap{position:relative;display:inline-block}
+    .cols-menu{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;min-width:200px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 10px 25px rgba(0,0,0,.08);padding:8px 6px;max-height:340px;overflow:auto}
+    .cols-menu.show{display:block}
+    .cols-menu label{display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:13px;color:#374151;cursor:pointer;border-radius:4px;user-select:none}
+    .cols-menu label:hover{background:#f3f4f6}
+    .cols-menu input[type="checkbox"]{accent-color:#6366f1;width:14px;height:14px;cursor:pointer}
+    .cols-menu hr{border:none;border-top:1px solid #e5e7eb;margin:5px 4px}
+    .cols-reset{display:block;width:calc(100% - 8px);margin:4px;font-size:12px;padding:6px 10px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;cursor:pointer}
+    .cols-reset:hover{background:#f3f4f6}
+
     /* Range bar */
     .rbar{display:flex;align-items:center;gap:5px;min-width:110px}
     .rtrack{flex:1;height:5px;background:#e5e7eb;border-radius:3px;overflow:hidden;position:relative}
@@ -102,18 +119,76 @@
 
     /* Toast */
     #toast{position:fixed;top:16px;right:16px;z-index:999;font-size:13px;padding:10px 18px;border-radius:8px;color:#fff;display:none;font-weight:500}
+
+    /* Status banner (background refresh progress) */
+    #status-banner{display:none;align-items:center;gap:10px;font-size:13px;padding:8px 14px;margin-bottom:1rem;background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:8px}
+    #status-banner.show{display:flex}
+    #status-banner .spin{width:12px;height:12px;border:2px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:spin 0.9s linear infinite}
+    #status-banner .bar{flex:1;height:4px;background:#e0e7ff;border-radius:2px;overflow:hidden;max-width:260px}
+    #status-banner .bar-fill{height:100%;background:#6366f1;transition:width .3s ease}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Date range pickers */
+    .range-group{display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap}
+    .range-lbl{font-size:12px;color:#6b7280;margin-left:4px}
+    .range-inp{font-size:13px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;outline:none;font-family:inherit}
+    .range-inp:focus{border-color:#6366f1}
+
+    /* Clickable stock name */
+    .stock-name{cursor:pointer;color:#111}
+    .stock-name:hover{color:#6366f1;text-decoration:underline}
+
+    /* Chart modal */
+    #modal-bg{position:fixed;inset:0;background:rgba(17,24,39,.55);z-index:900;display:none;align-items:center;justify-content:center;padding:20px}
+    #modal-bg.show{display:flex}
+    #modal{background:#fff;border-radius:12px;width:100%;max-width:880px;max-height:92vh;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.25);display:flex;flex-direction:column}
+    .modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;gap:10px}
+    .modal-hdr h2{font-size:16px;font-weight:700}
+    .modal-hdr .sub{font-size:12px;color:#6b7280;margin-top:2px}
+    .modal-close{font-size:20px;line-height:1;padding:4px 10px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px}
+    .modal-close:hover{background:#f3f4f6}
+    .modal-stats{display:flex;gap:18px;padding:12px 20px;background:#f9fafb;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;font-size:12px}
+    .modal-stats .stat{display:flex;flex-direction:column;gap:2px}
+    .modal-stats .lbl{color:#9ca3af;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+    .modal-stats .val{font-size:14px;font-weight:600;color:#111}
+    .modal-body{padding:18px 20px;height:400px;position:relative}
+    .modal-body canvas{max-width:100%}
+    .modal-loading,.modal-error{display:flex;align-items:center;justify-content:center;height:340px;color:#9ca3af;font-size:13px}
+    .modal-error{color:#dc2626}
   </style>
 </head>
 <body>
 <div id="app"><p style="padding:2rem;color:#9ca3af">Loading...</p></div>
 <div id="toast"></div>
+<div id="modal-bg" onclick="closeChart(event)">
+  <div id="modal" onclick="event.stopPropagation()">
+    <div class="modal-hdr">
+      <div>
+        <h2 id="modal-title">—</h2>
+        <div class="sub" id="modal-sub">—</div>
+      </div>
+      <button class="modal-close" onclick="closeChart()">×</button>
+    </div>
+    <div class="modal-stats" id="modal-stats"></div>
+    <div class="modal-body"><canvas id="modal-canvas"></canvas><div id="modal-msg"></div></div>
+  </div>
+</div>
 <script>
 // ── State ──────────────────────────────────────────────────
+function defaultRange() {
+  const to   = new Date();
+  const from = new Date(); from.setDate(from.getDate() - 30);
+  const iso  = d => d.toISOString().slice(0,10);
+  return { from: iso(from), to: iso(to) };
+}
+
 const state = {
   us:    [],
   india: [],
   view:  { us: "flat", india: "flat" },   // flat | sector
   sort:  { us: {col:null,dir:1}, india: {col:null,dir:1} },
+  range: { us: defaultRange(), india: defaultRange() },
+  prefs: { us: {}, india: {} },           // { order: [colIds], visible: { colId: bool } }
   activeTab: "us",
 };
 
@@ -143,6 +218,71 @@ function fmtPE(val) {
   return (!n || isNaN(n)) ? "—" : n.toFixed(2);
 }
 function curr(section) { return section==="india" ? "₹" : "$"; }
+
+// Large-number formatters for extended fundamentals.
+function fmtCap(n) {
+  const v = Number(n);
+  if (!v || isNaN(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1e12) return (v/1e12).toFixed(2) + "T";
+  if (abs >= 1e9)  return (v/1e9 ).toFixed(2) + "B";
+  if (abs >= 1e6)  return (v/1e6 ).toFixed(2) + "M";
+  return v.toLocaleString(undefined, {maximumFractionDigits:0});
+}
+// Yahoo returns fractions (0.0142 → 1.42%) for most percent fields.
+function fmtPctRaw(n, digits=2) {
+  const v = Number(n);
+  if (!v || isNaN(v)) return "—";
+  return (v * 100).toFixed(digits) + "%";
+}
+function fmtVol(n) {
+  const v = Number(n);
+  if (!v || isNaN(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1e6) return (v/1e6).toFixed(2) + "M";
+  if (abs >= 1e3) return (v/1e3).toFixed(1) + "K";
+  return v.toLocaleString(undefined, {maximumFractionDigits:0});
+}
+function fmtDate(ts) {
+  const n = Number(ts);
+  if (!n || isNaN(n)) return "—";
+  const d = new Date(n * 1000);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"numeric"});
+}
+function fmtRec(key) {
+  if (!key) return "—";
+  const map = {
+    "strong_buy":  "Strong Buy",
+    "buy":         "Buy",
+    "hold":        "Hold",
+    "sell":        "Sell",
+    "strong_sell": "Strong Sell",
+    "underperform":"Underperform",
+    "outperform":  "Outperform",
+    "none":        "—",
+  };
+  return map[String(key).toLowerCase()] || String(key);
+}
+function fmtNum(n, digits=2) {
+  const v = Number(n);
+  if (!v || isNaN(v)) return "—";
+  return v.toFixed(digits);
+}
+function fmtInt(n) {
+  const v = Number(n);
+  if (!v || isNaN(v)) return "—";
+  return Math.round(v).toLocaleString();
+}
+function fmtWebsite(url) {
+  if (!url) return "—";
+  let href = String(url);
+  if (!/^https?:/i.test(href)) href = "https://" + href;
+  let label = href.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+  if (label.length > 28) label = label.slice(0, 25) + "…";
+  const safe = href.replace(/"/g, "&quot;");
+  return `<a href="${safe}" target="_blank" rel="noopener" style="font-size:12px;color:#4f46e5">${label}↗</a>`;
+}
 
 function rbar(price, low, high) {
   const pct = (low>=high)?0:Math.min(100,Math.max(0,(price-low)/(high-low)*100));
@@ -193,7 +333,8 @@ async function del(ticker, section) {
 
 // ── Sort ───────────────────────────────────────────────────
 const COL_KEYS = {
-  name:1, ticker:1, price:1, change:1, high:1, low:1, pe:1, range:1, sector:1, industry:1
+  name:1, ticker:1, price:1, change:1, high:1, low:1, pe:1, range:1,
+  return_pct:1, sector:1, industry:1
 };
 
 function sortBy(section, col) {
@@ -213,6 +354,11 @@ function getSorted(section) {
       const pct = s => (s.low>=s.high)?0:(s.price-s.low)/(s.high-s.low)*100;
       av=pct(a); bv=pct(b);
     }
+    // Always sink nullish values to the bottom
+    const aNull = av==null, bNull = bv==null;
+    if (aNull && bNull) return 0;
+    if (aNull) return 1;
+    if (bNull) return -1;
     if (typeof av==="number") return (av-bv)*dir;
     return String(av||"").localeCompare(String(bv||""))*dir;
   });
@@ -269,62 +415,318 @@ function onDragEnd(e) {
   dragSrc=null;
 }
 
-// ── Build single row ───────────────────────────────────────
-function buildRow(s, section, showSectorCols) {
-  const c   = curr(section);
-  const tvEx = s.exchange==="NASDAQ"?"NASDAQ":s.exchange==="NYSE"?"NYSE":s.exchange;
-  const tvUrl = `https://www.tradingview.com/symbols/${tvEx}:${s.ticker}/`;
-  const yfUrl = `https://finance.yahoo.com/quote/${s.ticker}${({"NSE":".NS","BSE":".BO","LSE":".L","TSX":".TO","ASX":".AX"})[s.exchange]||""}/`;
-  const sectorCols = showSectorCols
-    ? `<td style="font-size:12px;color:#6b7280">${s.sector||"—"}</td><td style="font-size:12px;color:#6b7280">${s.industry||"—"}</td>`
-    : "";
-  const changeCell = fmtChange(s.change, s.change_pct, c);
+// ── Column-header drag & drop ──────────────────────────────
+let colDragId      = null;
+let colDragSection = null;
+let colDragTh      = null;
+
+function onColDragStart(e, section, colId) {
+  colDragId      = colId;
+  colDragSection = section;
+  colDragTh      = e.currentTarget;
+  e.dataTransfer.effectAllowed = "move";
+  try { e.dataTransfer.setData("text/plain", colId); } catch(_) {}
+  colDragTh.classList.add("col-dragging");
+}
+function onColDragOver(e) {
+  if (!colDragId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  document.querySelectorAll("th.col-drop-target").forEach(t=>t.classList.remove("col-drop-target"));
+  const th = e.currentTarget;
+  if (th && th !== colDragTh) th.classList.add("col-drop-target");
+}
+function onColDragLeave(e) {
+  e.currentTarget?.classList.remove("col-drop-target");
+}
+function onColDrop(e, section, targetId) {
+  e.preventDefault();
+  const srcId = colDragId;
+  if (!srcId || srcId === targetId || section !== colDragSection) return;
+
+  const order = fullOrder(section).filter(id => id !== srcId);
+  const ti    = order.indexOf(targetId);
+  if (ti < 0) return;
+  order.splice(ti, 0, srcId);
+
+  const prev = state.prefs[section] || {};
+  state.prefs[section] = { ...prev, order };
+  renderTable(section);
+  savePrefs(section);
+}
+function onColDragEnd(e) {
+  document.querySelectorAll("th.col-dragging").forEach(t=>t.classList.remove("col-dragging"));
+  document.querySelectorAll("th.col-drop-target").forEach(t=>t.classList.remove("col-drop-target"));
+  colDragId = colDragSection = colDragTh = null;
+}
+
+// ── Persist column prefs (debounced) ───────────────────────
+const _prefsTimers = {};
+function savePrefs(section) {
+  clearTimeout(_prefsTimers[section]);
+  _prefsTimers[section] = setTimeout(async () => {
+    const p = state.prefs[section] || {};
+    try {
+      await fetch("/api/prefs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section,
+          order:   p.order   || [],
+          visible: p.visible || {},
+        }),
+      });
+    } catch (_) {}
+  }, 300);
+}
+
+// ── Columns dropdown (show/hide per column) ────────────────
+function toggleColsMenu(e, section) {
+  e.stopPropagation();
+  // Close any other open menu first.
+  document.querySelectorAll(".cols-menu.show").forEach(m => {
+    if (m.id !== `cols-menu-${section}`) m.classList.remove("show");
+  });
+  const menu = document.getElementById(`cols-menu-${section}`);
+  if (!menu) return;
+  if (menu.classList.contains("show")) {
+    menu.classList.remove("show");
+    return;
+  }
+  menu.innerHTML = buildColsMenuHtml(section);
+  menu.classList.add("show");
+}
+
+function buildColsMenuHtml(section) {
+  const prefs = state.prefs[section] || {};
+  const vis   = prefs.visible || {};
+  const rows  = COLUMNS
+    .filter(c => !c.fixed)
+    .map(c => {
+      const label   = (typeof c.label === "function") ? c.label(section) : (c.label || c.id);
+      const checked = (vis[c.id] === undefined) ? true : !!vis[c.id];
+      return `<label>
+        <input type="checkbox" ${checked ? "checked" : ""}
+          onchange="toggleColVisible('${section}','${c.id}', this.checked)"/>
+        <span>${label}</span>
+      </label>`;
+    }).join("");
+  return rows + `<hr/><button class="cols-reset" onclick="resetCols('${section}')">Reset columns</button>`;
+}
+
+function toggleColVisible(section, colId, checked) {
+  const prev    = state.prefs[section] || {};
+  const visible = { ...(prev.visible || {}) };
+  visible[colId] = !!checked;
+  state.prefs[section] = { ...prev, visible };
+  renderTable(section);
+  savePrefs(section);
+}
+
+function resetCols(section) {
+  state.prefs[section] = { order: [], visible: {} };
+  const menu = document.getElementById(`cols-menu-${section}`);
+  if (menu) menu.innerHTML = buildColsMenuHtml(section);
+  renderTable(section);
+  savePrefs(section);
+}
+
+// Close the dropdown on outside-click or Esc.
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".cols-wrap")) return;
+  document.querySelectorAll(".cols-menu.show").forEach(m => m.classList.remove("show"));
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".cols-menu.show").forEach(m => m.classList.remove("show"));
+  }
+});
+
+// ── Formatting helpers ─────────────────────────────────────
+function fmtReturn(abs, pct, prefix) {
+  const a = Number(abs), p = Number(pct);
+  if ((abs == null && pct == null) || (!a && !p)) return `<span class="chg-flat">—</span>`;
+  const sign = a>=0 ? "+" : "";
+  const cls  = a>0 ? "chg-up" : a<0 ? "chg-dn" : "chg-flat";
+  return `<span class="${cls}">${sign}${prefix}${Math.abs(a).toFixed(2)}<br><small>${sign}${p.toFixed(2)}%</small></span>`;
+}
+function tvUrl(s) {
+  const ex = s.exchange==="NASDAQ"?"NASDAQ":s.exchange==="NYSE"?"NYSE":s.exchange;
+  return `https://www.tradingview.com/symbols/${ex}:${s.ticker}/`;
+}
+function yfUrl(s) {
+  const suf = ({"NSE":".NS","BSE":".BO","LSE":".L","TSX":".TO","ASX":".AX"})[s.exchange]||"";
+  return `https://finance.yahoo.com/quote/${s.ticker}${suf}/`;
+}
+
+// ── Column model ───────────────────────────────────────────
+const COLUMNS = [
+  { id:"drag",       fixed:true,  label:"",                  width:"32px" },
+  { id:"name",       sortable:true, label:"Name" },
+  { id:"ticker",     sortable:true, label:"Ticker" },
+  { id:"price",      sortable:true, label:(sc)=>`Price (${curr(sc)})` },
+  { id:"change",     sortable:true, label:"Day Change" },
+  { id:"return_pct", sortable:true, label:"Date-range-return%" },
+  { id:"high",       sortable:true, label:"52W High" },
+  { id:"low",        sortable:true, label:"52W Low" },
+  { id:"pe",         sortable:true, label:"P/E" },
+  { id:"range",      sortable:true, label:"52W Range" },
+  { id:"notes",      label:"Notes" },
+  { id:"sector",     sortable:true, label:"Sector",   hideInSectorView:true },
+  { id:"industry",   sortable:true, label:"Industry", hideInSectorView:true },
+  // Extended fundamentals — hidden by default, toggle via the Columns dropdown.
+  { id:"market_cap",     sortable:true, label:"Market Cap",        defaultHidden:true },
+  { id:"dividend_yield", sortable:true, label:"Div Yield %",       defaultHidden:true },
+  { id:"beta",           sortable:true, label:"Beta",              defaultHidden:true },
+  { id:"volume",         sortable:true, label:"Volume",            defaultHidden:true },
+  { id:"avg_volume",     sortable:true, label:"Avg Vol (10d)",     defaultHidden:true },
+  { id:"ma50",           sortable:true, label:"MA50",              defaultHidden:true },
+  { id:"ma200",          sortable:true, label:"MA200",             defaultHidden:true },
+  { id:"ex_div",         sortable:true, label:"Ex-Div Date",       defaultHidden:true },
+  { id:"forward_pe",     sortable:true, label:"Forward P/E",       defaultHidden:true },
+  { id:"price_to_sales", sortable:true, label:"P/S",               defaultHidden:true },
+  { id:"eps",            sortable:true, label:"EPS (TTM)",         defaultHidden:true },
+  { id:"price_to_book",  sortable:true, label:"P/B",               defaultHidden:true },
+  { id:"peg",            sortable:true, label:"PEG",               defaultHidden:true },
+  { id:"country",        sortable:true, label:"Country",           defaultHidden:true },
+  { id:"employees",      sortable:true, label:"Employees",         defaultHidden:true },
+  { id:"website",        label:"Website",                          defaultHidden:true },
+  { id:"target_mean",    sortable:true, label:"Target Mean",       defaultHidden:true },
+  { id:"recommendation", sortable:true, label:"Recommendation",    defaultHidden:true },
+  { id:"debt_equity",    sortable:true, label:"Debt / Equity",     defaultHidden:true },
+  { id:"roe",            sortable:true, label:"ROE %",             defaultHidden:true },
+  { id:"profit_margin",  sortable:true, label:"Profit Margin %",   defaultHidden:true },
+  { id:"earnings_date",  sortable:true, label:"Next Earnings",     defaultHidden:true },
+  { id:"actions",    fixed:true,    label:"" },
+];
+const COL_BY_ID = Object.fromEntries(COLUMNS.map(c => [c.id, c]));
+
+function fullOrder(section) {
+  const prefs = (state.prefs && state.prefs[section]) || {};
+  const known = new Set(COLUMNS.map(c => c.id));
+  let order = (prefs.order && prefs.order.length)
+    ? prefs.order.filter(id => known.has(id))
+    : COLUMNS.map(c => c.id);
+  COLUMNS.forEach(c => { if (!order.includes(c.id)) order.push(c.id); });
+  // Pin fixed columns to their canonical ends.
+  order = order.filter(id => id !== "drag" && id !== "actions");
+  return ["drag", ...order, "actions"];
+}
+
+function effectiveColumns(section, viewMode) {
+  const prefs = (state.prefs && state.prefs[section]) || {};
+  const visible = prefs.visible || {};
+  return fullOrder(section)
+    .map(id => COL_BY_ID[id])
+    .filter(Boolean)
+    .filter(c => {
+      if (viewMode === "sector" && c.hideInSectorView) return false;
+      if (c.fixed) return true;
+      const v = visible[c.id];
+      if (v === undefined) return !c.defaultHidden;
+      return !!v;
+    });
+}
+
+// ── Cell renderers ─────────────────────────────────────────
+function renderCell(colId, s, section) {
+  const c = curr(section);
+  switch (colId) {
+    case "drag":
+      return `<td><span class="drag-handle" title="Drag to reorder">⠿</span></td>`;
+    case "name":
+      return `<td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis">
+        <span class="stock-name" title="Click to view chart" onclick="openChart('${s.ticker}','${section}')">${s.name}</span>
+      </td>`;
+    case "ticker":
+      return `<td>
+        <a href="${tvUrl(s)}" target="_blank" title="TradingView">${s.ticker}</a>
+        <a href="${yfUrl(s)}" target="_blank" title="Yahoo Finance" style="margin-left:6px;font-size:11px;color:#9ca3af;font-weight:400">YF↗</a>
+        <span style="margin-left:5px;font-size:11px;color:#9ca3af">${s.exchange}</span>
+      </td>`;
+    case "price":      return `<td style="font-weight:600">${fmt(s.price,c)}</td>`;
+    case "change":     return `<td>${fmtChange(s.change, s.change_pct, c)}</td>`;
+    case "return_pct": return `<td>${fmtReturn(s.return_abs, s.return_pct, c)}</td>`;
+    case "high":       return `<td style="color:#16a34a">${fmt(s.high,c)}</td>`;
+    case "low":        return `<td style="color:#dc2626">${fmt(s.low,c)}</td>`;
+    case "pe":         return `<td>${fmtPE(s.pe)}</td>`;
+    case "range":      return `<td>${rbar(s.price,s.low,s.high)}</td>`;
+    case "notes":      return `<td>${noteHTML(s.ticker,section,s.notes)}</td>`;
+    case "sector":     return `<td style="font-size:12px;color:#6b7280">${s.sector||"—"}</td>`;
+    case "industry":   return `<td style="font-size:12px;color:#6b7280">${s.industry||"—"}</td>`;
+    case "market_cap":     return `<td>${fmtCap(s.market_cap)}</td>`;
+    case "dividend_yield": return `<td>${fmtPctRaw(s.dividend_yield)}</td>`;
+    case "beta":           return `<td>${fmtNum(s.beta)}</td>`;
+    case "volume":         return `<td>${fmtVol(s.volume)}</td>`;
+    case "avg_volume":     return `<td>${fmtVol(s.avg_volume)}</td>`;
+    case "ma50":           return `<td>${fmt(s.ma50, c)}</td>`;
+    case "ma200":          return `<td>${fmt(s.ma200, c)}</td>`;
+    case "ex_div":         return `<td style="font-size:12px">${fmtDate(s.ex_div)}</td>`;
+    case "forward_pe":     return `<td>${fmtNum(s.forward_pe)}</td>`;
+    case "price_to_sales": return `<td>${fmtNum(s.price_to_sales)}</td>`;
+    case "eps":            return `<td>${fmtNum(s.eps)}</td>`;
+    case "price_to_book":  return `<td>${fmtNum(s.price_to_book)}</td>`;
+    case "peg":            return `<td>${fmtNum(s.peg)}</td>`;
+    case "country":        return `<td style="font-size:12px;color:#6b7280">${s.country||"—"}</td>`;
+    case "employees":      return `<td>${fmtInt(s.employees)}</td>`;
+    case "website":        return `<td>${fmtWebsite(s.website)}</td>`;
+    case "target_mean":    return `<td>${s.target_mean ? fmt(s.target_mean, c) : "—"}</td>`;
+    case "recommendation": return `<td style="font-size:12px">${fmtRec(s.recommendation)}</td>`;
+    case "debt_equity":    return `<td>${fmtNum(s.debt_equity)}</td>`;
+    case "roe":            return `<td>${fmtPctRaw(s.roe)}</td>`;
+    case "profit_margin":  return `<td>${fmtPctRaw(s.profit_margin)}</td>`;
+    case "earnings_date":  return `<td style="font-size:12px">${fmtDate(s.earnings_date)}</td>`;
+    case "actions":    return `<td><button class="btn-del" onclick="del('${s.ticker}','${section}')">Delete</button></td>`;
+  }
+  return `<td></td>`;
+}
+
+// ── Header cell ────────────────────────────────────────────
+function thHtml(section, col, opts) {
+  opts = opts || {};
+  if (col.fixed) {
+    const w = col.width ? ` style="width:${col.width}"` : "";
+    return `<th${w}></th>`;
+  }
+  const label = (typeof col.label === "function") ? col.label(section) : col.label;
+  // Sector-grouped view: keep headers simple (no drag-to-reorder there).
+  if (opts.sectorMode) {
+    return `<th>${label}</th>`;
+  }
+  const cls     = col.sortable ? thClass(section, col.id) : "";
+  const onClick = col.sortable ? ` onclick="sortBy('${section}','${col.id}')"` : "";
+  return `<th class="${cls}" data-col="${col.id}" draggable="true"
+      ondragstart="onColDragStart(event,'${section}','${col.id}')"
+      ondragover="onColDragOver(event)"
+      ondragleave="onColDragLeave(event)"
+      ondrop="onColDrop(event,'${section}','${col.id}')"
+      ondragend="onColDragEnd(event)"${onClick}>${label}</th>`;
+}
+
+// ── Build a data row (iterates effective columns) ──────────
+function buildRow(s, section, viewMode) {
+  const cols = effectiveColumns(section, viewMode);
   return `<tr data-ticker="${s.ticker}" draggable="true"
     ondragstart="onDragStart(event)"
     ondragover="onDragOver(event)"
     ondragleave="onDragLeave(event)"
     ondrop="onDrop(event,'${section}')"
     ondragend="onDragEnd(event)">
-    <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
-    <td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis">${s.name}</td>
-    <td>
-      <a href="${tvUrl}" target="_blank" title="TradingView">${s.ticker}</a>
-      <a href="${yfUrl}" target="_blank" title="Yahoo Finance" style="margin-left:6px;font-size:11px;color:#9ca3af;font-weight:400">YF↗</a>
-      <span style="margin-left:5px;font-size:11px;color:#9ca3af">${s.exchange}</span>
-    </td>
-    <td style="font-weight:600">${fmt(s.price,c)}</td>
-    <td>${changeCell}</td>
-    <td style="color:#16a34a">${fmt(s.high,c)}</td>
-    <td style="color:#dc2626">${fmt(s.low,c)}</td>
-    <td>${fmtPE(s.pe)}</td>
-    <td>${rbar(s.price,s.low,s.high)}</td>
-    <td>${noteHTML(s.ticker,section,s.notes)}</td>
-    ${sectorCols}
-    <td><button class="btn-del" onclick="del('${s.ticker}','${section}')">Delete</button></td>
+    ${cols.map(c => renderCell(c.id, s, section)).join("")}
   </tr>`;
 }
 
 // ── Flat table render ──────────────────────────────────────
 function flatTable(section) {
   const stocks = getSorted(section);
-  const sc     = section;
-  const thS    = (col,label) => `<th class="${thClass(sc,col)}" onclick="sortBy('${sc}','${col}')">${label}</th>`;
-  const c      = curr(section);
-
   if (!stocks.length) return `<div class="tbl-wrap"><div class="empty">No stocks yet — add one above</div></div>`;
 
+  const cols = effectiveColumns(section, "flat");
+  const ths  = cols.map(c => thHtml(section, c)).join("");
+
   return `<div class="tbl-wrap"><table>
-    <thead><tr>
-      <th style="width:32px"></th>
-      ${thS("name","Name")}${thS("ticker","Ticker")}
-      ${thS("price",`Price (${c})`)}${thS("change","Day Change")}${thS("high","52W High")}${thS("low","52W Low")}
-      ${thS("pe","P/E")}
-      <th class="sortable" onclick="sortBy('${sc}','range')" class="${thClass(sc,'range')}">52W Range</th>
-      <th>Notes</th>
-      ${thS("sector","Sector")}${thS("industry","Industry")}
-      <th></th>
-    </tr></thead>
-    <tbody>${stocks.map(s=>buildRow(s,section,true)).join("")}</tbody>
+    <thead><tr>${ths}</tr></thead>
+    <tbody>${stocks.map(s => buildRow(s, section, "flat")).join("")}</tbody>
   </table></div>`;
 }
 
@@ -333,17 +735,19 @@ function sectorTable(section) {
   const stocks = state[section];
   if (!stocks.length) return `<div class="tbl-wrap"><div class="empty">No stocks yet — add one above</div></div>`;
 
+  const cols = effectiveColumns(section, "sector");
+  const ths  = cols.map(c => thHtml(section, c, { sectorMode: true })).join("");
+
   // Group by sector → industry
   const groups = {};
   for (const s of stocks) {
     const sec = s.sector   || "Other";
     const ind = s.industry || "Other";
-    if (!groups[sec])       groups[sec]    = {};
-    if (!groups[sec][ind])  groups[sec][ind] = [];
+    if (!groups[sec])      groups[sec]      = {};
+    if (!groups[sec][ind]) groups[sec][ind] = [];
     groups[sec][ind].push(s);
   }
 
-  const c = curr(section);
   let html = "";
   for (const [sec, industries] of Object.entries(groups).sort()) {
     const total = Object.values(industries).flat().length;
@@ -354,17 +758,11 @@ function sectorTable(section) {
       </div>
       <div class="tbl-wrap" style="border-radius:0 0 8px 8px">
         <table>
-          <thead><tr>
-            <th style="width:32px"></th>
-            <th>Name</th><th>Ticker</th>
-            <th>Price (${c})</th><th>Day Change</th><th>52W High</th><th>52W Low</th>
-            <th>P/E</th><th style="min-width:120px">52W Range</th>
-            <th>Notes</th><th></th>
-          </tr></thead>
+          <thead><tr>${ths}</tr></thead>
           <tbody>`;
     for (const [ind, indStocks] of Object.entries(industries).sort()) {
-      html += `<tr><td colspan="10" class="industry-hdr">${ind} (${indStocks.length})</td></tr>`;
-      html += indStocks.map(s=>buildRow(s,section,false)).join("");
+      html += `<tr><td colspan="${cols.length}" class="industry-hdr">${ind} (${indStocks.length})</td></tr>`;
+      html += indStocks.map(s => buildRow(s, section, "sector")).join("");
     }
     html += `</tbody></table></div></div>`;
   }
@@ -425,13 +823,96 @@ async function addStock(section) {
   toast(`Added ${j.stock.ticker} @ ${curr(section)}${j.stock.price}`);
 }
 
-// ── Refresh all ────────────────────────────────────────────
+// ── Refresh all (non-blocking) ─────────────────────────────
 async function refreshAll() {
-  const btn=document.getElementById("refresh-btn");
-  btn.disabled=true;btn.textContent="Refreshing…";
-  toast("Refreshing all prices…","info");
-  await fetch("/api/refresh",{method:"POST"});
-  location.reload();
+  const r = await fetch("/api/refresh", { method: "POST" });
+  const j = await r.json();
+  if (j.started) {
+    toast("Refresh started…", "info");
+  } else {
+    toast("A refresh is already running", "info");
+  }
+  startStatusPolling();
+}
+
+// ── Status banner + poller ─────────────────────────────────
+let statusTimer    = null;
+let wasRunning     = false;
+
+function showBanner(s) {
+  const el   = document.getElementById("status-banner");
+  const text = document.getElementById("status-text");
+  const fill = document.getElementById("status-bar-fill");
+  const btn  = document.getElementById("refresh-btn");
+  if (!el) return;
+
+  if (s && s.running) {
+    el.classList.add("show");
+    const cur = s.current ? ` — ${s.current}` : "";
+    text.textContent = `Updating prices ${s.done || 0}/${s.total || 0}${cur}`;
+    const pct = s.total ? ((s.done || 0) / s.total) * 100 : 0;
+    fill.style.width = `${pct}%`;
+    if (btn) { btn.disabled = true; btn.textContent = "Refreshing…"; }
+  } else {
+    el.classList.remove("show");
+    if (btn) { btn.disabled = false; btn.textContent = "Refresh prices"; }
+  }
+}
+
+async function pollStatusOnce() {
+  try {
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    showBanner(s);
+
+    // Detect running → finished transition and reload stock data.
+    if (wasRunning && !s.running) {
+      wasRunning = false;
+      try {
+        const sr = await fetch("/api/stocks");
+        const sd = await sr.json();
+        mergePrices("us",    sd.us    || []);
+        mergePrices("india", sd.india || []);
+        renderTable("us");
+        renderTable("india");
+        toast("Prices updated");
+      } catch (_) {}
+      stopStatusPolling();
+      return;
+    }
+    if (s.running) wasRunning = true;
+
+    if (!s.running) stopStatusPolling();
+  } catch (_) {
+    // Network hiccup — keep polling.
+  }
+}
+
+function startStatusPolling() {
+  pollStatusOnce();
+  if (statusTimer) return;
+  statusTimer = setInterval(pollStatusOnce, 2000);
+}
+function stopStatusPolling() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+}
+
+function mergePrices(section, fresh) {
+  const map = Object.fromEntries(fresh.map(s => [s.ticker, s]));
+  state[section].forEach(s => {
+    const n = map[s.ticker];
+    if (!n) return;
+    // Keep notes / order / return_pct we already hold locally.
+    s.name       = n.name;
+    s.price      = n.price;
+    s.change     = n.change;
+    s.change_pct = n.change_pct;
+    s.high       = n.high;
+    s.low        = n.low;
+    s.pe         = n.pe;
+    s.sector     = n.sector;
+    s.industry   = n.industry;
+  });
 }
 
 // ── Page HTML ──────────────────────────────────────────────
@@ -442,6 +923,7 @@ function buildPageShell(section) {
   const exchanges = section==="india"
     ? "NSE · BSE"
     : "NYSE · NASDAQ · OTC · LSE · TSX · ASX";
+  const r = state.range[section];
   return `
     <div class="toolbar">
       <input id="inp-${section}" type="text" placeholder="${hint}"
@@ -451,6 +933,21 @@ function buildPageShell(section) {
       <div class="sep"></div>
       <button class="btn-view active" id="view-${section}-flat"  onclick="setView('${section}','flat')">Flat</button>
       <button class="btn-view"        id="view-${section}-sector" onclick="setView('${section}','sector')">By Sector</button>
+      <div class="cols-wrap">
+        <button class="btn-view" id="cols-btn-${section}" onclick="toggleColsMenu(event,'${section}')">Columns ▾</button>
+        <div class="cols-menu" id="cols-menu-${section}"></div>
+      </div>
+      <div class="sep"></div>
+      <span class="range-group">
+        <span class="range-lbl">From</span>
+        <input class="range-inp" type="date" id="from-${section}" value="${r.from}"
+          onchange="onRangeChange('${section}')"/>
+      </span>
+      <span class="range-group">
+        <span class="range-lbl">To</span>
+        <input class="range-inp" type="date" id="to-${section}" value="${r.to}"
+          onchange="onRangeChange('${section}')"/>
+      </span>
       <div class="add-err" id="err-${section}"></div>
     </div>
     <div id="table-area-${section}"></div>
@@ -458,8 +955,138 @@ function buildPageShell(section) {
       <span><span class="dot" style="background:#22c55e"></span>Above 60% of 52W range</span>
       <span><span class="dot" style="background:#f59e0b"></span>30–60%</span>
       <span><span class="dot" style="background:#ef4444"></span>Below 30%</span>
-      <span style="margin-left:auto">⠿ drag to reorder · click column header to sort · click note to edit</span>
+      <span style="margin-left:auto">⠿ drag to reorder · click header to sort · click name for chart · click note to edit</span>
     </div>`;
+}
+
+// ── Date range & returns ───────────────────────────────────
+function onRangeChange(section) {
+  const from = document.getElementById(`from-${section}`).value;
+  const to   = document.getElementById(`to-${section}`).value;
+  if (!from || !to) return;
+  if (from >= to) { toast("From must be before To","error"); return; }
+  state.range[section] = { from, to };
+  loadReturns(section);
+}
+
+async function loadReturns(section) {
+  const { from, to } = state.range[section];
+  // Clear current values so stale numbers aren't shown while fetching.
+  state[section].forEach(s => { s.return_pct = null; s.return_abs = null; });
+  renderTable(section);
+  toast(`Loading ${section.toUpperCase()} returns (${from} → ${to})…`, "info");
+
+  try {
+    const r = await fetch("/api/returns", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ section, from, to }),
+    });
+    const j = await r.json();
+    if (!j.ok) { toast(j.error || "Failed to load returns","error"); return; }
+
+    const map = j.returns || {};
+    state[section].forEach(s => {
+      const v = map[s.ticker];
+      s.return_pct = (v && typeof v.return_pct === "number") ? v.return_pct : null;
+      s.return_abs = (v && typeof v.return_abs === "number") ? v.return_abs : null;
+    });
+    renderTable(section);
+    toast(`${section.toUpperCase()} returns updated`);
+  } catch (e) {
+    toast("Network error loading returns","error");
+  }
+}
+
+// ── Chart modal ────────────────────────────────────────────
+let chartInstance = null;
+
+function closeChart(e) {
+  if (e && e.target && e.target.id !== "modal-bg" && e.type === "click") return;
+  document.getElementById("modal-bg").classList.remove("show");
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeChart();
+});
+
+async function openChart(ticker, section) {
+  const { from, to } = state.range[section];
+  const stock = state[section].find(s => s.ticker === ticker);
+  const bg    = document.getElementById("modal-bg");
+  const title = document.getElementById("modal-title");
+  const sub   = document.getElementById("modal-sub");
+  const stats = document.getElementById("modal-stats");
+  const msg   = document.getElementById("modal-msg");
+  const canvas = document.getElementById("modal-canvas");
+
+  title.textContent = `${stock ? stock.name : ticker} (${ticker})`;
+  sub.textContent   = `${from} → ${to}`;
+  stats.innerHTML   = "";
+  msg.innerHTML     = `<div class="modal-loading">Loading chart…</div>`;
+  canvas.style.display = "none";
+  bg.classList.add("show");
+
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+  try {
+    const qs = new URLSearchParams({ from, to, section });
+    const r  = await fetch(`/api/history/${encodeURIComponent(ticker)}?${qs}`);
+    const j  = await r.json();
+    if (!j.ok) { msg.innerHTML = `<div class="modal-error">${j.error||"Failed to load"}</div>`; return; }
+    if (!j.series || j.series.length < 2) {
+      msg.innerHTML = `<div class="modal-error">Not enough data in this range</div>`;
+      return;
+    }
+
+    const c    = curr(section);
+    const s    = j.stats || {};
+    const sign = (n) => (n>=0?"+":"") + n.toFixed(2);
+    const retCls = (s.return_pct||0) > 0 ? "chg-up" : (s.return_pct||0) < 0 ? "chg-dn" : "chg-flat";
+    stats.innerHTML = `
+      <div class="stat"><span class="lbl">Start</span><span class="val">${c}${(s.start||0).toFixed(2)}</span></div>
+      <div class="stat"><span class="lbl">End</span><span class="val">${c}${(s.end||0).toFixed(2)}</span></div>
+      <div class="stat"><span class="lbl">Return</span><span class="val ${retCls}">${sign(s.return_pct||0)}%</span></div>
+      <div class="stat"><span class="lbl">Range High</span><span class="val">${c}${(s.high||0).toFixed(2)}</span></div>
+      <div class="stat"><span class="lbl">Range Low</span><span class="val">${c}${(s.low||0).toFixed(2)}</span></div>
+      <div class="stat"><span class="lbl">Points</span><span class="val">${j.series.length}</span></div>`;
+
+    msg.innerHTML = "";
+    canvas.style.display = "block";
+
+    const labels = j.series.map(([ts]) => new Date(ts*1000).toISOString().slice(0,10));
+    const data   = j.series.map(([,cl]) => cl);
+    const up     = (s.return_pct||0) >= 0;
+    const color  = up ? "#16a34a" : "#dc2626";
+
+    chartInstance = new Chart(canvas, {
+      type: "line",
+      data: { labels, datasets: [{
+        label: ticker,
+        data,
+        borderColor: color,
+        backgroundColor: color + "22",
+        fill: true,
+        pointRadius: 0,
+        borderWidth: 2,
+        tension: 0.15,
+      }]},
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: ctx => `${c}${ctx.parsed.y.toFixed(2)}` } } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, font: { size: 11 } }, grid: { display: false } },
+          y: { ticks: { callback: v => c + v.toFixed(2), font: { size: 11 } },
+               grid: { color: "#f3f4f6" } },
+        },
+      },
+    });
+  } catch (e) {
+    msg.innerHTML = `<div class="modal-error">Network error</div>`;
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────
@@ -469,12 +1096,24 @@ async function init() {
   state.us    = data.us    || [];
   state.india = data.india || [];
 
+  try {
+    const pr = await fetch("/api/prefs");
+    const pd = await pr.json();
+    state.prefs.us    = pd.us    || {};
+    state.prefs.india = pd.india || {};
+  } catch (_) {}
+
   document.getElementById("app").innerHTML = `
     <div class="hdr">
       <h1>Stock Watchlist</h1>
       <div class="hdr-right">
         <button class="btn-refresh" id="refresh-btn" onclick="refreshAll()">Refresh prices</button>
       </div>
+    </div>
+    <div id="status-banner">
+      <div class="spin"></div>
+      <span id="status-text">Updating prices…</span>
+      <div class="bar"><div class="bar-fill" id="status-bar-fill" style="width:0%"></div></div>
     </div>
     <div class="tabs">
       <button class="tab active" data-tab="us" onclick="switchTab('us')">
@@ -491,6 +1130,14 @@ async function init() {
 
   renderTable("us");
   renderTable("india");
+
+  // Populate Return % column for both tabs (lazy; may take a while on first run).
+  loadReturns("us");
+  loadReturns("india");
+
+  // Pick up any background refresh that may already be running (e.g. the
+  // one kicked off automatically at server startup).
+  startStatusPolling();
 }
 
 init().catch(e=>{
