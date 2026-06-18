@@ -9,12 +9,42 @@ EXCHANGE_SUFFIX = {
     "SSE":  ".SS", "TYO": ".T",
 }
 
+# Yahoo Finance "exchange" codes (as returned by v1/finance/search) → our labels.
+# Used to figure out which exchange a US/etc. symbol (no suffix) lives on.
+YAHOO_EXCHANGE_CODE = {
+    "NMS": "NASDAQ", "NCM": "NASDAQ", "NGM": "NASDAQ",
+    "NYQ": "NYSE",   "NYS": "NYSE",
+    "PNK": "OTC",    "OBB": "OTC",    "OEM": "OTC",
+    "NSI": "NSE",    "BSE": "BSE",
+    "LSE": "LSE",    "TOR": "TSX",    "ASX": "ASX",
+    "HKG": "HKEx",   "SHH": "SSE",    "JPX": "TYO",
+}
+
 
 def yf_symbol(ticker: str, exchange: str) -> str:
     """Return the Yahoo Finance symbol for a ticker+exchange pair."""
     # Yahoo Finance uses hyphens for dots in tickers like BRK.B → BRK-B
     yf_ticker = ticker.replace(".", "-")
     return yf_ticker + EXCHANGE_SUFFIX.get(exchange.upper(), "")
+
+
+def reverse_yahoo_symbol(symbol: str, exch_code: str):
+    """
+    Reverse of yf_symbol: given a Yahoo symbol (e.g. "ARE&M.NS", "AAPL", "BRK-B")
+    plus the Yahoo exchange code (e.g. "NSI", "NMS"), return our (ticker, exchange_label)
+    pair, or None if the exchange isn't supported.
+    """
+    if not symbol:
+        return None
+    # Suffix-bearing exchanges (NSE/BSE/LSE/...): strip the suffix.
+    for label, suf in EXCHANGE_SUFFIX.items():
+        if suf and symbol.endswith(suf):
+            return symbol[:-len(suf)].replace("-", "."), label
+    # No suffix → US/OTC; resolve via Yahoo's exchange code.
+    label = YAHOO_EXCHANGE_CODE.get((exch_code or "").upper())
+    if not label:
+        return None
+    return symbol.replace("-", "."), label
 
 
 def safe_float(val, default: float = 0.0) -> float:

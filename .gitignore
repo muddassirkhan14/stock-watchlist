@@ -18,3 +18,8 @@ data/prefs.json
 # IDE
 .vscode/
 .idea/
+.cursor/
+
+# Optional Docker bind-mount: corporate CA files (keep directory via certs/.gitkeep)
+certs/*.pem
+certs/*.crt

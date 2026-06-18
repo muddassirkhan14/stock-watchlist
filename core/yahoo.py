@@ -8,12 +8,15 @@ yahoo.py — all Yahoo Finance API interactions:
   - compute_return()     : return % between two unix timestamps
 """
 
+import os
 import time
 import threading
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
-from core.models   import safe_float, yf_symbol
+from core.models   import safe_float, yf_symbol, reverse_yahoo_symbol
 from core.storage  import (
     load_watchlist, load_cache, save_cache,
     load_history, save_history,
@@ -43,18 +46,45 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+_tls_warn_silenced = False
+
+
+def _yahoo_ssl_verify() -> bool:
+    """
+    When False, Yahoo HTTPS calls skip TLS certificate verification.
+    Set env YAHOO_SSL_VERIFY=0 on networks that intercept HTTPS (corporate
+    proxies) where Linux containers do not trust the inspection CA.
+    Default is verify on (1).
+    """
+    v = os.environ.get("YAHOO_SSL_VERIFY", "1").strip().lower()
+    return v not in ("0", "false", "no", "")
+
+
+def _silence_insecure_tls_warning_once() -> None:
+    global _tls_warn_silenced
+    if _tls_warn_silenced or _yahoo_ssl_verify():
+        return
+    _tls_warn_silenced = True
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except Exception:
+        pass
+
 
 # ── Session ───────────────────────────────────────────────────
 
 def get_session_and_crumb():
     """Return (requests.Session, crumb) or (None, None) on failure."""
+    _silence_insecure_tls_warning_once()
+    verify = _yahoo_ssl_verify()
     session = requests.Session()
     session.headers.update(HEADERS)
     try:
-        session.get("https://finance.yahoo.com", timeout=10)
+        session.get("https://finance.yahoo.com", timeout=10, verify=verify)
         time.sleep(1)
         r = session.get(
-            "https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10
+            "https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10, verify=verify
         )
         crumb = r.text.strip()
         if crumb and "<" not in crumb:
@@ -62,6 +92,52 @@ def get_session_and_crumb():
     except Exception as e:
         print(f"  Session error: {e}")
     return None, None
+
+
+# ── Search (autocomplete by name) ─────────────────────────────
+
+def search_tickers(q: str, session=None) -> list:
+    """
+    Hit Yahoo's lightweight search endpoint and return a normalized list
+    of candidates: [{ticker, exchange, name, type, section}, ...].
+    Results from exchanges we don't map are silently dropped so the rest
+    of the add pipeline never sees something it can't handle.
+    """
+    if not q or len(q.strip()) < 2:
+        return []
+    _silence_insecure_tls_warning_once()
+    verify = _yahoo_ssl_verify()
+    sess = session or requests.Session()
+    try:
+        r = sess.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": q.strip(), "quotesCount": 10, "newsCount": 0},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+            verify=verify,
+        )
+        if r.status_code != 200:
+            return []
+        quotes = r.json().get("quotes", []) or []
+    except Exception:
+        return []
+
+    out = []
+    for q_ in quotes:
+        if q_.get("quoteType") not in ("EQUITY", "ETF", "INDEX", "MUTUALFUND"):
+            continue
+        rev = reverse_yahoo_symbol(q_.get("symbol", ""), q_.get("exchange", ""))
+        if not rev:
+            continue
+        ticker, exchange = rev
+        out.append({
+            "ticker":   ticker,
+            "exchange": exchange,
+            "name":     q_.get("shortname") or q_.get("longname") or ticker,
+            "type":     q_.get("quoteType"),
+            "section":  "india" if exchange in ("NSE", "BSE") else "us",
+        })
+    return out
 
 
 # ── Single quote ──────────────────────────────────────────────
@@ -73,12 +149,15 @@ def fetch_quote(ticker: str, exchange: str, session, crumb) -> dict:
     or      { ok: False, error: str }
     """
     symbol = yf_symbol(ticker, exchange)
+    sym_url = quote(symbol, safe="")
+    verify = _yahoo_ssl_verify()
     try:
         # v8 chart — price + 52W range + day change
         r = session.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_url}",
             params={"range": "5d", "interval": "1d", "crumb": crumb},
             timeout=15,
+            verify=verify,
         )
         if r.status_code == 429:
             return {"ok": False, "error": "Rate limited — wait a minute and try again"}
@@ -108,9 +187,10 @@ def fetch_quote(ticker: str, exchange: str, session, crumb) -> dict:
         # 52W high/low — fetch separately with 1y range if not in meta
         if not high52 or not low52:
             r1y = session.get(
-                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_url}",
                 params={"range": "1y", "interval": "1d", "crumb": crumb},
                 timeout=15,
+                verify=verify,
             )
             if r1y.status_code == 200:
                 res1y = r1y.json().get("chart", {}).get("result", [])
@@ -151,13 +231,14 @@ def fetch_quote(ticker: str, exchange: str, session, crumb) -> dict:
         earnings_date  = 0
 
         r2 = session.get(
-            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}",
+            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym_url}",
             params={
                 "modules": ("summaryDetail,defaultKeyStatistics,assetProfile,"
                             "financialData,calendarEvents"),
                 "crumb":   crumb,
             },
             timeout=15,
+            verify=verify,
         )
         if r2.status_code == 200:
             try:
@@ -271,16 +352,53 @@ def fetch_quote(ticker: str, exchange: str, session, crumb) -> dict:
 
 _refresh_lock = threading.Lock()
 
+# Each worker thread gets its own Yahoo session (requests.Session is not thread-safe).
+_refresh_tls = threading.local()
+
+
+def _thread_session_and_crumb():
+    """Lazily create one (session, crumb) pair per worker thread."""
+    if getattr(_refresh_tls, "ready", False):
+        return _refresh_tls.session, _refresh_tls.crumb
+    _refresh_tls.ready = True
+    session, crumb = get_session_and_crumb()
+    _refresh_tls.session, _refresh_tls.crumb = session, crumb
+    return session, crumb
+
+
+def _refresh_one_entry(entry: dict):
+    """Fetch one quote; safe to run in parallel across threads (own session per thread)."""
+    ticker   = entry["ticker"]
+    exchange = entry["exchange"]
+    session, crumb = _thread_session_and_crumb()
+    if not session:
+        return ticker, {"ok": False, "error": "Could not get Yahoo Finance session"}
+    return ticker, fetch_quote(ticker, exchange, session, crumb)
+
 
 def refresh_all_prices() -> None:
     """
     Re-fetch live prices for every ticker in the watchlist and save to cache.
     Notes and order in watchlist.json are never touched.
     Updates REFRESH_STATUS while it runs so the UI can show progress.
+
+    Uses a bounded thread pool (env REFRESH_WORKERS, default 6, max 16) so many
+    tickers refresh concurrently; each thread keeps its own Yahoo session.
     """
-    wl          = load_watchlist()
-    cache       = load_cache()
-    all_entries = wl.get("us", []) + wl.get("india", [])
+    wl    = load_watchlist()
+    cache = load_cache()
+
+    # Flatten across every sub-list in every section, dedupe by ticker
+    # so the same ticker appearing in multiple sub-lists is fetched once.
+    seen = set()
+    all_entries = []
+    for section in wl.values():
+        for sub in section.get("lists", []):
+            for entry in sub.get("stocks", []):
+                t = (entry.get("ticker") or "").upper()
+                if t and t not in seen:
+                    seen.add(t)
+                    all_entries.append(entry)
 
     REFRESH_STATUS.update({
         "running": True, "done": 0, "total": len(all_entries),
@@ -292,33 +410,39 @@ def refresh_all_prices() -> None:
             print("  Watchlist is empty — nothing to refresh.")
             return
 
-        print("  Getting Yahoo Finance session...")
-        session, crumb = get_session_and_crumb()
-        if not session:
-            print("  Could not get session — skipping price refresh.")
-            REFRESH_STATUS["error"] = "Could not get Yahoo Finance session"
-            return
+        try:
+            workers = int(os.environ.get("REFRESH_WORKERS", "6"))
+        except ValueError:
+            workers = 6
+        workers = max(1, min(workers, 16))
 
-        for entry in all_entries:
-            ticker   = entry["ticker"]
-            exchange = entry["exchange"]
-            REFRESH_STATUS["current"] = ticker
-            print(f"  {ticker:10s} ({exchange}) ...", end=" ", flush=True)
+        print(f"  Refreshing {len(all_entries)} tickers with up to {workers} parallel workers…")
 
-            result = fetch_quote(ticker, exchange, session, crumb)
-            if result["ok"]:
-                cache[ticker] = {k: v for k, v in result.items() if k != "ok"}
-                sign = "+" if result["change"] >= 0 else ""
-                print(
-                    f"${result['price']}  "
-                    f"{sign}{result['change']} ({sign}{result['change_pct']}%)  "
-                    f"P/E={result['pe']}"
-                )
-            else:
-                print(f"FAILED — {result['error']}")
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_map = {pool.submit(_refresh_one_entry, e): e for e in all_entries}
+            for fut in as_completed(future_map):
+                entry = future_map[fut]
+                ticker = entry["ticker"]
+                try:
+                    tkr, result = fut.result()
+                    ticker = tkr
+                except Exception as e:
+                    result = {"ok": False, "error": str(e)}
 
-            REFRESH_STATUS["done"] += 1
-            time.sleep(1.5)
+                REFRESH_STATUS["current"] = ticker
+                if result.get("ok"):
+                    cache[ticker] = {k: v for k, v in result.items() if k != "ok"}
+                    sign = "+" if result["change"] >= 0 else ""
+                    print(
+                        f"  {ticker:10s} ({entry.get('exchange','')})  "
+                        f"${result['price']}  "
+                        f"{sign}{result['change']} ({sign}{result['change_pct']}%)  "
+                        f"P/E={result['pe']}"
+                    )
+                else:
+                    print(f"  {ticker:10s} … FAILED — {result.get('error', 'unknown')}")
+
+                REFRESH_STATUS["done"] += 1
 
         save_cache(cache)
     finally:
@@ -357,11 +481,14 @@ def fetch_history(ticker: str, exchange: str, session, crumb,
     Uses Yahoo's v8 chart endpoint with 1d interval. Returns [] on failure.
     """
     symbol = yf_symbol(ticker, exchange)
+    sym_url = quote(symbol, safe="")
+    verify = _yahoo_ssl_verify()
     try:
         r = session.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_url}",
             params={"range": range_, "interval": "1d", "crumb": crumb},
             timeout=20,
+            verify=verify,
         )
         if r.status_code != 200:
             print(f"  history HTTP {r.status_code} for {symbol}")
