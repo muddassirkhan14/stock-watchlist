@@ -1,0 +1,20 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        # Default helps `docker compose up --build` on SSL-inspected networks (pip → PyPI).
+        # Full pip TLS: set BUILD_PIP_TRUSTED_HOST=strict in .env (see README).
+        BUILD_PIP_TRUSTED_HOST: ${BUILD_PIP_TRUSTED_HOST:-pypi.org files.pythonhosted.org}
+    ports:
+      - "7080:7080"
+    volumes:
+      - ./data:/app/data
+      # Optional: drop your organisation's root CA here as .crt or .pem (not committed).
+      # Entrypoint runs update-ca-certificates so Yahoo Finance HTTPS works at runtime.
+      - ./certs:/usr/local/share/ca-certificates/corp-mount:ro
+    environment:
+      REFRESH_WORKERS: "6"
+      # Corporate SSL inspection: Linux container cannot verify Yahoo TLS without your org CA.
+      # "0" skips certificate verification for Yahoo requests only (docker default). On open internet, set "1".
+      YAHOO_SSL_VERIFY: "0"
